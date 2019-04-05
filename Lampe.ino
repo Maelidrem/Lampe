@@ -29,11 +29,34 @@
 
 xSH01 SH01;
 
+enum Mode
+{
+  OFF,
+  ALL,
+  BLINK,
+  WHITE,
+  SWITCH,
+};
+
+enum BlinkState
+{
+  GREEN,
+  RED,
+  BLUE,
+};
+
 bool ledState[4];
-// Timer pour eviter les rebonds humain (#Lolo)
 short smoothTimer[4];
 bool switchedState[4];
-void setup() {
+bool buttonState[4];
+int duration;
+Mode modeCorrespondance[4];
+
+BlinkState currentBlinkState;
+Mode currentMode;
+
+void setup() 
+{
   //Start I2C com at 115200 bauds
   Serial.begin(115200);
   Wire.begin();
@@ -43,11 +66,21 @@ void setup() {
   pinMode(GREEN_LED_PIN, OUTPUT);
   pinMode(RED_LED_PIN, OUTPUT);
 
+  duration = 0;
+  currentBlinkState = GREEN;
+  currentMode = OFF;
+  
   for (int i = 0; i < 4; i++)
   {
     ledState[i] = false;
     switchedState[i] = false;
+    buttonState[i] = false;
   }
+  
+  modeCorrespondance[TRIANGLE_INDEX] = SWITCH;
+  modeCorrespondance[CIRCLE_INDEX] = ALL;
+  modeCorrespondance[CROSS_INDEX] = WHITE;
+  modeCorrespondance[SQUARE_INDEX] = BLINK;   
 }
 
 bool CheckTouched(int buttonIndex)
@@ -72,59 +105,142 @@ bool CheckTouched(int buttonIndex)
   return false;
 }
 
-short GetLedIndexForButtonIndex(short buttonIndex)
+bool CheckPressed(int buttonIndex)
 {
-    switch(buttonIndex)
-    {
-      case TRIANGLE_INDEX:
-        return WHITE_INDEX;      
-      case SQUARE_INDEX:
-        return BLUE_INDEX;      
-      case CROSS_INDEX:
-        return GREEN_INDEX;     
-      case CIRCLE_INDEX:
-        return RED_INDEX;     
-      default:
-        return -1;
-    }
-
-    return -1;
-}
-
-void SetStateForEnlightening(int buttonIndex)
-{
-    short ledIndex = GetLedIndexForButtonIndex(buttonIndex);
     if (CheckTouched(buttonIndex))
     {
       smoothTimer[buttonIndex] ++;
-      if(smoothTimer[buttonIndex] > 10 && !switchedState[ledIndex])
+      if(smoothTimer[buttonIndex] > 10 && !buttonState[buttonIndex])
       {
-        switchedState[ledIndex] = true;
-        ledState[ledIndex] = !ledState[ledIndex];
+        buttonState[buttonIndex] = true;
+        return true;
       }
     }
     else
     {     
-        switchedState[ledIndex] = false;
+        buttonState[buttonIndex] = false;
         smoothTimer[buttonIndex] = 0;
     }
+
+    return false;
 }
+
+void UpdateBlinkState() 
+{
+    duration++;
+    if (duration > 25)
+    {
+      duration = 0;
+      switch(currentBlinkState)
+      {
+        case RED:
+          currentBlinkState = GREEN;
+          break;
+        case GREEN:
+          currentBlinkState = BLUE;
+          break;
+        case BLUE:
+          currentBlinkState = RED;
+          break;
+      }
+    }
+}
+
+void UpdateBlinkStateOnButtonPress() 
+{
+  switch(currentBlinkState)
+  {
+    case RED:
+      currentBlinkState = GREEN;
+      break;
+    case GREEN:
+      currentBlinkState = BLUE;
+      break;
+    case BLUE:
+    currentBlinkState = RED;
+    break;
+  }
+}
+ 
+void SetLedStatesUsingBlinkState()
+{
+    switch(currentBlinkState)
+    {
+      case RED:
+         ledState[RED_INDEX] = 1;
+         ledState[GREEN_INDEX] = 0;
+         ledState[BLUE_INDEX] = 0;
+         ledState[WHITE_INDEX] = 0;
+         break;    
+      case GREEN:
+         ledState[RED_INDEX] = 0;
+         ledState[GREEN_INDEX] = 1;
+         ledState[BLUE_INDEX] = 0;
+         ledState[WHITE_INDEX] = 0;
+         break;
+      case BLUE:
+         ledState[RED_INDEX] = 0;
+         ledState[GREEN_INDEX] = 0;
+         ledState[BLUE_INDEX] = 1;
+         ledState[WHITE_INDEX] = 0;
+         break;   
+    }  
+}
+
+void SetMode(Mode mode)
+{
+    currentMode = currentMode == mode ? OFF: mode;
+}
+
 
 void loop() {
   SH01.poll();
   for (int i = 0; i < 4; i++)
   {
-    SetStateForEnlightening(i);
+    if (CheckPressed(i))
+    {
+      SetMode(modeCorrespondance[i]);
+      if (i == TRIANGLE_INDEX)
+      {
+        UpdateBlinkStateOnButtonPress();
+      }
+    }
+  }
+
+  switch(currentMode)
+  {
+    case ALL:
+      ledState[RED_INDEX] = 1;
+      ledState[GREEN_INDEX] = 1;
+      ledState[BLUE_INDEX] = 1;
+      ledState[WHITE_INDEX] = 1;
+      break;
+    case OFF:
+      ledState[RED_INDEX] = 0;
+      ledState[GREEN_INDEX] = 0;
+      ledState[BLUE_INDEX] = 0;
+      ledState[WHITE_INDEX] = 0;
+      break;
+    case BLINK:
+      UpdateBlinkState();
+      SetLedStatesUsingBlinkState();
+      break;
+    case WHITE:
+      ledState[RED_INDEX] = 0;
+      ledState[GREEN_INDEX] = 0;
+      ledState[BLUE_INDEX] = 0;
+      ledState[WHITE_INDEX] = 1;
+      break;
+    case SWITCH:
+      SetLedStatesUsingBlinkState();
+      break;
   }
   
-  if (SH01.touchDetected()) 
-  {
-    // Display led in function of state leds
-    digitalWrite(WHITE_LED_PIN, ledState[WHITE_INDEX]);
-    digitalWrite(BLUE_LED_PIN, ledState[BLUE_INDEX]);
-    digitalWrite(GREEN_LED_PIN, ledState[GREEN_INDEX]);
-    digitalWrite(RED_LED_PIN, ledState[RED_INDEX]);
-  }
+  // Display led in function of state leds
+  digitalWrite(WHITE_LED_PIN, ledState[WHITE_INDEX]);
+  digitalWrite(BLUE_LED_PIN, ledState[BLUE_INDEX]);
+  digitalWrite(GREEN_LED_PIN, ledState[GREEN_INDEX]);
+  digitalWrite(RED_LED_PIN, ledState[RED_INDEX]);
   
   delay(10);
 }
